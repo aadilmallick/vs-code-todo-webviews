@@ -32,12 +32,16 @@ type Panel = {
   panel: vscode.WebviewPanel;
 };
 
+type WebviewPanelOptions = {
+  onDidDispose?: () => void;
+};
+
 export class WebviewPanel {
   private static panels = [] as Panel[];
   static extensionUri: vscode.Uri;
-  private currentPanel: vscode.WebviewPanel;
   private static assetsPath: vscode.Uri;
   private static scriptsPath: vscode.Uri;
+  private static context: vscode.ExtensionContext;
 
   static getPanel(webViewTitle: string) {
     return WebviewPanel.panels.find(
@@ -50,16 +54,13 @@ export class WebviewPanel {
     return titles.includes(webViewTitle);
   }
 
-  /**
-   *
-   * @param webViewTitle the title of the webview
-   * @param context the context
-   * @returns
-   */
-  constructor(
-    private webViewTitle: string,
-    private context: vscode.ExtensionContext
+  static createPanel(
+    webViewTitle: string,
+    context: vscode.ExtensionContext,
+    scriptName: string,
+    options?: WebviewPanelOptions
   ) {
+    WebviewPanel.context = context;
     WebviewPanel.extensionUri = context.extensionUri;
     WebviewPanel.assetsPath = vscode.Uri.joinPath(
       WebviewPanel.extensionUri,
@@ -80,8 +81,7 @@ export class WebviewPanel {
         throw new Error("Panel not found");
       }
       currentPanel.panel.reveal();
-      this.currentPanel = currentPanel.panel;
-      return this;
+      return currentPanel.panel;
     }
 
     const columnToShowIn = vscode.window.activeTextEditor
@@ -94,22 +94,36 @@ export class WebviewPanel {
       columnToShowIn || vscode.ViewColumn.One, // Editor column to show the new webview panel in.
       getWebviewOptions(WebviewPanel.extensionUri) // Webview options. More on these later.
     );
-    panel.webview.html = WebviewPanel.getWebviewContent(panel);
-    this.currentPanel = panel;
+    const scriptUri = WebviewPanel.getScriptUri(scriptName, panel);
+    panel.webview.html = WebviewPanel.getWebviewContent(panel, scriptUri);
+    panel.onDidDispose(
+      () => {
+        options?.onDidDispose && options.onDidDispose();
+        WebviewPanel.panels = WebviewPanel.panels.filter(
+          (_panel) => _panel.webViewTitle !== webViewTitle
+        );
+      },
+      null,
+      WebviewPanel.context.subscriptions
+    );
 
     // add panel to existing panels
     WebviewPanel.panels.push({ webViewTitle, panel });
 
-    this.onDisposePanel(panel, () => {
-      vscode.window.showInformationMessage("Webview disposed");
-      WebviewPanel.panels = WebviewPanel.panels.filter(
-        (panel) => panel.webViewTitle !== webViewTitle
-      );
-    });
+    return panel;
   }
 
-  onDisposePanel(panel: vscode.WebviewPanel, cb: () => void) {
-    panel.onDidDispose(cb, null, this.context.subscriptions);
+  static onWebviewDestroyed(panel: vscode.WebviewPanel, cb?: () => void) {
+    panel.onDidDispose(
+      () => {
+        WebviewPanel.panels = WebviewPanel.panels.filter(
+          (_panel) => _panel.webViewTitle !== panel.title
+        );
+        cb && cb();
+      },
+      null,
+      WebviewPanel.context.subscriptions
+    );
   }
 
   static getAssetUri(assetPath: string, panel: vscode.WebviewPanel) {
@@ -122,12 +136,11 @@ export class WebviewPanel {
     return panel.webview.asWebviewUri(path);
   }
 
-  static getWebviewContent(panel: vscode.WebviewPanel) {
+  static getWebviewContent(panel: vscode.WebviewPanel, scriptPath: vscode.Uri) {
     const nonce = getNonce();
     const webview = panel.webview;
     const resetCSSLink = WebviewPanel.getAssetUri("reset.css", panel);
     const vscodeCSSLink = WebviewPanel.getAssetUri("vscode.css", panel);
-    console.log(resetCSSLink, vscodeCSSLink);
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -140,11 +153,12 @@ export class WebviewPanel {
         <script nonce="${nonce}">
             const vscode = acquireVsCodeApi();
             window.vscode = vscode;
+            console.log(window.vscode);
         </script>
     </head>
     <body>
-        <h1>hello world</h1>
-        <button>click me</button>
+        <div id="root"></div>
+        <script nonce="${nonce}" src="${scriptPath}" type="module"></script>
     </body>
     </html>`;
   }
