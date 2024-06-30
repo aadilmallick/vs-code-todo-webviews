@@ -9,7 +9,7 @@ console.log("path:", path.resolve(__dirname, "src/webviews/scripts"));
 
 const scripts = fs
   .readdirSync(path.resolve(__dirname, "src/webviews/scripts"))
-  .filter((file) => file.endsWith(".ts"))
+  .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))
   .map((file) => path.resolve(__dirname, "src/webviews/scripts", file));
 
 console.log("scripts:", scripts);
@@ -41,7 +41,7 @@ const extensionConfig = {
     rules: [
       {
         test: /\.ts$/,
-        exclude: /node_modules/,
+        exclude: /node_modules|\.d\.ts$/,
         use: [
           {
             loader: "ts-loader",
@@ -54,6 +54,14 @@ const extensionConfig = {
             },
           },
         ],
+      },
+      {
+        test: /\.d\.ts$/,
+        loader: "ignore-loader",
+      },
+      {
+        test: /\.html$/i,
+        loader: "html-loader",
       },
     ],
   },

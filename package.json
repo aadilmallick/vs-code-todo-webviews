@@ -17,21 +17,26 @@
         "command": "vscode-todo.helloWorld",
         "title": "Hello World",
         "category": "Todo"
+      },
+      {
+        "command": "vscode-todo.refresh-webview",
+        "title": "refresh",
+        "category": "Todo"
       }
     ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "webpack && npm run compile:webviews",
-    "watch": "concurrently \"webpack --watch\" \"webpack --config ./webpack.config.browser.js --watch\"",
+    "watch": "concurrently \"webpack --watch\" \"npm run compile:webviews-watch\"",
     "package": "webpack --mode production --devtool hidden-source-map && webpack --config ./webpack.config.browser.js",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "vscode-test",
-    "compile:webviews": "webpack --config ./webpack.config.browser.js",
-    "compile:webviews-watch": "webpack --config ./webpack.config.browser.js --watch"
+    "compile:webviews": "webpack --config ./webpack.config.browser.js --mode production",
+    "compile:webviews-watch": "webpack --config ./webpack.config.browser.js --watch --mode development"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.7",
@@ -43,6 +48,8 @@
     "@vscode/test-electron": "^2.4.0",
     "concurrently": "^8.2.2",
     "eslint": "^8.57.0",
+    "html-loader": "^5.0.0",
+    "ignore-loader": "^0.1.2",
     "ts-loader": "^9.5.1",
     "typescript": "^5.4.5",
     "webpack": "^5.92.1",

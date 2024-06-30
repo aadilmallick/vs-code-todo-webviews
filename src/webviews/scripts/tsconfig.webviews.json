@@ -4,13 +4,16 @@
     "target": "ES2022",
     "lib": ["DOM"],
     "sourceMap": true,
-    "rootDir": ".",
     "strict": true,
     "jsx": "react",
-    "moduleResolution": "Node"
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "noEmitOnError": false
     /* Additional Checks */
     // "noImplicitReturns": true, /* Report error when not all code paths in function return a value. */
     // "noFallthroughCasesInSwitch": true, /* Report errors for fallthrough cases in switch statement. */
     // "noUnusedParameters": true,  /* Report errors on unused parameters. */
-  }
+  },
+  "include": ["./*.ts", "./*.tsx"]
+  // "exclude": ["globals.d.ts"]
 }

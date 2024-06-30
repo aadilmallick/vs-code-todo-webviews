@@ -34,6 +34,7 @@ type Panel = {
 
 type WebviewPanelOptions = {
   onDidDispose?: () => void;
+  onMessageReceived?: (data: { command: string; payload: any }) => void;
 };
 
 export class WebviewPanel {
@@ -42,24 +43,17 @@ export class WebviewPanel {
   private static assetsPath: vscode.Uri;
   private static scriptsPath: vscode.Uri;
   private static context: vscode.ExtensionContext;
+  private static hasInitialized = false;
+  private _panel?: vscode.WebviewPanel;
 
-  static getPanel(webViewTitle: string) {
-    return WebviewPanel.panels.find(
-      (panel) => panel.webViewTitle === webViewTitle
-    );
+  public get panel() {
+    return this._panel;
   }
 
-  static panelExists(webViewTitle: string) {
-    const titles = WebviewPanel.panels.map((panel) => panel.webViewTitle);
-    return titles.includes(webViewTitle);
-  }
-
-  static createPanel(
-    webViewTitle: string,
-    context: vscode.ExtensionContext,
-    scriptName: string,
-    options?: WebviewPanelOptions
-  ) {
+  static init(context: vscode.ExtensionContext) {
+    if (WebviewPanel.hasInitialized) {
+      return;
+    }
     WebviewPanel.context = context;
     WebviewPanel.extensionUri = context.extensionUri;
     WebviewPanel.assetsPath = vscode.Uri.joinPath(
@@ -73,6 +67,35 @@ export class WebviewPanel {
       "dist",
       "scripts"
     );
+    WebviewPanel.hasInitialized = true;
+  }
+
+  static getPanel(webViewTitle: string) {
+    return WebviewPanel.panels.find(
+      (panel) => panel.webViewTitle === webViewTitle
+    );
+  }
+
+  static panelExists(webViewTitle: string) {
+    const titles = WebviewPanel.panels.map((panel) => panel.webViewTitle);
+    return titles.includes(webViewTitle);
+  }
+
+  static killPanel(webViewTitle: string) {
+    const panel = WebviewPanel.getPanel(webViewTitle);
+    if (!panel) {
+      return;
+    }
+    panel.panel.dispose();
+  }
+
+  static createPanel(
+    webViewTitle: string,
+    context: vscode.ExtensionContext,
+    scriptName: string,
+    options?: WebviewPanelOptions
+  ) {
+    WebviewPanel.init(context);
 
     // if panel aleady exists, reveal it
     if (WebviewPanel.panelExists(webViewTitle)) {
@@ -81,36 +104,83 @@ export class WebviewPanel {
         throw new Error("Panel not found");
       }
       currentPanel.panel.reveal();
-      return currentPanel.panel;
+      const panel = new WebviewPanel(webViewTitle, scriptName, options);
+      panel.setPanel(currentPanel.panel);
+      return panel;
     }
 
+    const basePanel = new WebviewPanel(webViewTitle, scriptName, options);
+
+    const panel = WebviewPanel.buildPanel(basePanel);
+    basePanel.setPanel(panel);
+
+    // add panel to existing panels
+    return basePanel;
+  }
+
+  static buildPanel(basePanel: WebviewPanel) {
     const columnToShowIn = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
 
     const panel = vscode.window.createWebviewPanel(
-      formatString(webViewTitle), // Identifies the type of the webview. Used internally
-      webViewTitle, // Title of the panel displayed to the user
+      formatString(basePanel.webViewTitle), // Identifies the type of the webview. Used internally
+      basePanel.webViewTitle, // Title of the panel displayed to the user
       columnToShowIn || vscode.ViewColumn.One, // Editor column to show the new webview panel in.
       getWebviewOptions(WebviewPanel.extensionUri) // Webview options. More on these later.
     );
-    const scriptUri = WebviewPanel.getScriptUri(scriptName, panel);
+    const scriptUri = WebviewPanel.getScriptUri(basePanel.scriptName, panel);
     panel.webview.html = WebviewPanel.getWebviewContent(panel, scriptUri);
     panel.onDidDispose(
       () => {
-        options?.onDidDispose && options.onDidDispose();
+        basePanel.options?.onDidDispose && basePanel.options.onDidDispose();
         WebviewPanel.panels = WebviewPanel.panels.filter(
-          (_panel) => _panel.webViewTitle !== webViewTitle
+          (_panel) => _panel.webViewTitle !== basePanel.webViewTitle
         );
       },
       null,
       WebviewPanel.context.subscriptions
     );
+    if (basePanel.options?.onMessageReceived) {
+      panel.webview.onDidReceiveMessage(
+        basePanel.options.onMessageReceived,
+        null,
+        WebviewPanel.context.subscriptions
+      );
+    }
 
-    // add panel to existing panels
-    WebviewPanel.panels.push({ webViewTitle, panel });
-
+    WebviewPanel.panels.push({ webViewTitle: basePanel.webViewTitle, panel });
     return panel;
+  }
+
+  static recreatePanel(basePanel: WebviewPanel) {
+    WebviewPanel.killPanel(basePanel.webViewTitle);
+    const panel = WebviewPanel.buildPanel(basePanel);
+    basePanel.setPanel(panel);
+    return basePanel;
+  }
+
+  private constructor(
+    public webViewTitle: string,
+    private scriptName: string,
+    private options?: WebviewPanelOptions
+  ) {}
+
+  private setPanel(panel: vscode.WebviewPanel) {
+    this._panel = panel;
+  }
+
+  onMessage(
+    onMessageReceived: (data: { command: string; payload: any }) => void
+  ) {
+    if (!this.panel) {
+      throw new Error("Panel not defined, in onMessage");
+    }
+    this.panel.webview.onDidReceiveMessage(
+      onMessageReceived,
+      null,
+      WebviewPanel.context.subscriptions
+    );
   }
 
   static onWebviewDestroyed(panel: vscode.WebviewPanel, cb?: () => void) {
@@ -141,6 +211,7 @@ export class WebviewPanel {
     const webview = panel.webview;
     const resetCSSLink = WebviewPanel.getAssetUri("reset.css", panel);
     const vscodeCSSLink = WebviewPanel.getAssetUri("vscode.css", panel);
+    const stylesLink = WebviewPanel.getAssetUri("styles.css", panel);
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -149,11 +220,10 @@ export class WebviewPanel {
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; img-src ${webview.cspSource} https:; script-src 'nonce-${nonce}';">
         <link href="${resetCSSLink}" rel="stylesheet">
 				<link href="${vscodeCSSLink}" rel="stylesheet">
+				<link href="${stylesLink}" rel="stylesheet">
 
         <script nonce="${nonce}">
-            const vscode = acquireVsCodeApi();
-            window.vscode = vscode;
-            console.log(window.vscode);
+            const tsvscode = acquireVsCodeApi();
         </script>
     </head>
     <body>
